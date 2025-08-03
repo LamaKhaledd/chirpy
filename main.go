@@ -38,9 +38,8 @@ func main() {
 	fileServer := http.FileServer(http.Dir("app"))
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app", fileServer)))
 
-	mux.HandleFunc("/metrics", apiCfg.handlerMetrics)
-
-	mux.HandleFunc("/reset", apiCfg.handlerReset)
+	mux.Handle("/metrics", http.HandlerFunc(apiCfg.handlerMetrics))
+	mux.Handle("/reset", http.HandlerFunc(apiCfg.handlerReset))
 
 	fmt.Println("Server running on http://localhost:8080")
 	http.ListenAndServe(":8080", mux)
