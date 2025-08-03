@@ -30,6 +30,12 @@ func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("Hits counter reset"))
 }
 
+func handlerHealthz(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("OK"))
+}
+
 func main() {
 	apiCfg := &apiConfig{}
 
@@ -38,8 +44,9 @@ func main() {
 	fileServer := http.FileServer(http.Dir("app"))
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app", fileServer)))
 
-	mux.Handle("/metrics", http.HandlerFunc(apiCfg.handlerMetrics))
-	mux.Handle("/reset", http.HandlerFunc(apiCfg.handlerReset))
+	mux.Handle("GET /api/healthz", http.HandlerFunc(handlerHealthz))
+	mux.Handle("GET /api/metrics", http.HandlerFunc(apiCfg.handlerMetrics))
+	mux.Handle("POST /api/reset", http.HandlerFunc(apiCfg.handlerReset))
 
 	fmt.Println("Server running on http://localhost:8080")
 	http.ListenAndServe(":8080", mux)
