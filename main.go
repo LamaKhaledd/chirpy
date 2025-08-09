@@ -1,17 +1,24 @@
 package main
 
 import (
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"html/template"
-	"net/http"
-	"sync/atomic"
-	"encoding/json"
 	"log"
+	"net/http"
+	"os"
 	"strings"
+	"sync/atomic"
+
+	_ "github.com/lib/pq"
+	"github.com/joho/godotenv"
+	"chirpy/internal/database"
 )
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
+	DB             *database.Queries
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -23,22 +30,18 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 
 func (cfg *apiConfig) handlerMetrics(w http.ResponseWriter, r *http.Request) {
 	count := cfg.fileserverHits.Load()
-
 	tmpl, err := template.ParseFiles("app/admin_metrics.html")
 	if err != nil {
 		http.Error(w, "Failed to load metrics page", http.StatusInternalServerError)
 		return
 	}
-
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-
 	data := struct {
 		Count int32
 	}{
 		Count: count,
 	}
-
 	tmpl.Execute(w, data)
 }
 
@@ -62,9 +65,6 @@ type errorResponse struct {
 	Error string `json:"error"`
 }
 
-type validResponse struct {
-	Valid bool `json:"valid"`
-}
 func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
 	var chirp chirpRequest
 	decoder := json.NewDecoder(r.Body)
@@ -82,10 +82,8 @@ func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Profanity filter: replace profane words with ****
 	profaneWords := []string{"kerfuffle", "sharbert", "fornax"}
 	words := strings.Split(chirp.Body, " ")
-
 	for i, word := range words {
 		for _, bad := range profaneWords {
 			if strings.EqualFold(word, bad) {
@@ -93,10 +91,8 @@ func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-
 	cleaned := strings.Join(words, " ")
 
-	// Return cleaned body
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
@@ -104,21 +100,35 @@ func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-
 func main() {
-	apiCfg := &apiConfig{}
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+
+	dbURL := os.Getenv("DB_URL")
+	if dbURL == "" {
+		log.Fatal("DB_URL not set in environment")
+	}
+
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatal("Failed to connect to DB:", err)
+	}
+
+	dbQueries := database.New(db)
+
+	apiCfg := &apiConfig{
+		DB: dbQueries,
+	}
 
 	mux := http.NewServeMux()
-
 	fileServer := http.FileServer(http.Dir("app"))
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app", fileServer)))
-
 	mux.Handle("GET /healthz", http.HandlerFunc(handlerHealthz))
-
 	mux.Handle("GET /admin/metrics", http.HandlerFunc(apiCfg.handlerMetrics))
 	mux.Handle("POST /admin/reset", http.HandlerFunc(apiCfg.handlerReset))
 	mux.Handle("POST /api/validate_chirp", http.HandlerFunc(handlerValidateChirp))
-
 
 	fmt.Println("Server running on http://localhost:8080")
 	http.ListenAndServe(":8080", mux)
